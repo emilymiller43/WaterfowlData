@@ -1,0 +1,876 @@
+---
+title: "Intro to R - Final Report"
+author: "Emily Miller"
+date: "May 12th, 2023"
+output: pdf_document
+---
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(readr)
+``` 
+# Introduction
+Each year millions of waterfowl migrate from their breeding to wintering areas providing cultural and economic benefits, including opportunities to observe and legally harvest waterfowl (Schummer et al. 2010, Green and Elmberg 2014, Raftovich et al. 2019). These opportunities provide substantial economic stimulus to rural communities (Grado et al. 2011, Cooper et al. 2015). However, the timing and distributions of waterfowl can vary annually, leading to changes in opportunities to observe and harvest these birds (Schummer et al. 2017). Long-term changes in timing of migration may necessitate modifications of waterfowl hunting seasons to coincide with greatest opportunities to view and harvest waterfowl (Schummer et al. 2017). 
+
+In Kansas, 60 years of bi-weekly waterfowl survey (BWS) data from Kansas Department of Wildlife and Parks (KDWP) provide abundant opportunities to refine our understanding of factors influencing timing of waterfowl migration, determine long-term timing of peak migration, and match these data with Kansas waterfowl hunting seasons for the greatest opportunities in observation and harvest. Seeing an abundance of waterfowl and having the opportunity for harvest were identified by hunters as factors increasing satisfaction, which is important to retaining, recruiting, and reactivating waterfowl hunters (R3; Fulton et al. 2017). Therefore, it may be increasingly important to understand how to provide a quality hunt on public land to R3 waterfowl hunters.
+
+In addition to the BWS data, KDWP also has 60 plus years of available data from the Parts Collection Survey (PCS) conducted by the U.S. Fish and Wildlife Service each year. This survey provides data on the sex, age, and species of waterfowl harvested across the country. A random selection of hunters are provided with a postage paid envelope prior to the start of the hunting season and asked to send in one wing from each duck they harvest during the season. This data used in conjunction with the BWS will allow KDWP biologists to determine if their established hunting season dates overlap with the timing of migrating waterfowl to provide optimal opportunities to view and harvest waterfowl.
+
+# Data Background
+Data were obtained from KDWP who recorded and kept data in Microsoft Excel worksheets. All BWS data were cleaned by a previous PhD student, Ben West, on this project from 2020-2021. Each BWS data entry represents a single ground survey conducted by a wildlife biologist at one location. During these surveys, biologists count the total number of observed waterfowl by species. Each PCS entry represents a single wing provided by a hunter in Kansas. Each wing is given a harvest weight representing the relative abundance of a given species that was harvested on a given date in a particular area. Some hunters did not fill out the forms completely prior to sending in their wings. PCS data were cleaned (entries with no date or harvest information were removed) prior to being read into R.  
+
+```{r, echo=TRUE}
+bws <- read_csv("/Users/emilymiller/Desktop/Kansas Data/KS_bimonthly_fall_2021_tidy_v4.csv", 
+                show_col_types = F)
+str(bws)
+```
+The variables I will use for analysis in the BWS data include:
+
+1. `survey_year`
+2. `survey_period`
+3. `zone_2016_2021`
+4. Species codes (specifically `MALL`)
+
+```{r, echo=TRUE}
+pcs_all <- read_csv("/Users/emilymiller/Desktop/Kansas Data/PCS_1961-2020.csv", 
+                    show_col_types = F)
+str(pcs_all)
+```
+The variables I will use for analysis in the PCS data include:
+
+1. `Season`
+2. `HMonth`, `HDay`, `HYear`
+3. `County`
+4. `Species`
+5. `Harvest_weight`
+
+# Methods
+### Data Preparation 
+Between the two data sets, there is no location or tame stamp variables that match. To directly compare these data, I needed to examine where each `County` (Figure 1) from the PCS data was located in the `zone_2016_2021` zone (Figure 2) in the BWS data. 
+
+```{r echo=FALSE, out.width="100%", fig.align='center'}
+knitr::include_graphics("Kansas Zones.jpg", error = F)
+```
+*Figure 1. Established Kansas hunting season zones across the state as of 2021. Zones are shown as different gray-scale polygons overlaying the 105 counties that make up the state.*
+
+```{r echo=FALSE, out.width="100%", fig.align='center'}
+knitr::include_graphics("Kansas_zone_by_county.jpeg", error = F)
+```
+*Figure 2. Kansas hunting season zones split up by county boundaries across the state as of 2021. Whatever zone a particular county was most covered by, the whole county was assigned to that zone. For example, Ness county is covered most by the `High Plains Zone` in Figure 1, therefore it was assigned `High Plains Zone`.*
+
+In addition to associating each of the 105 counties with one of the 4 hunting zones, I also needed to associate `HMonth`, `HDay`, and `HYear` with specific predetermined survey periods (Table 1). Assigning each county to a zone and determining which survey period a PCS entry fell into was completed in Microsoft Excel. 
+
+*Table 1. Pre-established survey periods. Months were split up into two week blocks for easy comparison and analysis.*
+
+Survey Period | Dates in Survey Period
+:-----------: | ----------------------
+      1       |    September 1  - 15
+      2       |    September 15 - 30
+      3       |    October    1 - 15
+      4       |    October   15 - 31
+      5       |    November   1 - 15
+      6       |    November  16 - 30
+      7       |    December   1 - 15
+      8       |    December  16 - 31
+      9       |    January    1 - 15
+      10      |    January   16 - 31
+      11      |    February   1 - 15
+      12      |    February  15 - 28
+      13      |    March      1 - 15
+      14      |    March     16 - 31
+
+KDWP wanted the last decade of available data (2010 - 2020) to be used in analysis. I created subsets of each dataset for these years, significantly reducing the size of each dataset. 
+
+```{r, echo=TRUE}
+pcs_all <- read_csv("/Users/emilymiller/Desktop/PCS Clean/PCS_1961_2020_clean.csv")
+pcs_2011_2020 <- subset(pcs_all, HYear >= "2011")
+bws_2011_2020 <- subset(bws, survey_year >= "2011")
+dim(pcs_2011_2020)
+dim(bws_2011_2020)
+```
+
+### Data Analysis
+
+Since the PCS data represents individual harvested birds, I needed to sum the harvest weights of entries where the `Season`, `SurveyPeriod`, `HYear`, `Zone` and `Species` were the same to obtain a total `Harvest_weight` for a each species in each survey period and zone where data is available. Using the aggregate function provides a single `Harvest_weight` value for each species in a given zone during each survey period. I then created a mallard subset since this is one of the most harvested and observed species in the state. 
+```{r}
+pcs_ag <- aggregate(pcs_2011_2020, Harvest_weight~ Season+SurveyPeriod+
+                      HYear+Zone+Species, FUN = sum)
+
+pcs_2010_2020_MALL <- subset(pcs_ag, Species =="MALL")
+head(pcs_2010_2020_MALL)
+```
+
+I created separate Microsoft Excel files from the BWS and PCS data for each hunting season (2010-2020) by zone. Within these excel files I combined the raw count data for mallards from the BWS and harvest weights from the PCS data. I standardized the raw count and harvest weight data on a scale from 0-1, where peak in migration (count) and peak in harvest (harvest weight) are given a value of 1 (Table 2). 
+
+*Table 2. Example of the proportion of Migration and Harvest calculations for mallards in the 2010-2011 hunting season in the High Plains Hunting Zone in Kansas. `MALL_total` is the raw count data of the total number of mallards in the BWS during that survey period. `Proportion_Mig` is the standardized raw count data (`MALL_total`). `HarvestWeight` is the aggregated harvest weights for that zone and survey period. `Proportion_Harvest` is the standardized `HarvestWeight`.* 
+
+
+Survey Period | SurveyPeriod | MALL_total | Proportion_Mig | HarvestWeight  | Proportion_Harvest | Zone        
+:------------:|:------------:|:----------:|:--------------:|:--------------:|:------------------:|:-----------:
+Sep  1 - 15   |      1       |     0      |        0       |        0       |          0         | High Plains 
+Sep 16 - 30   |      2       |     10     |        0.0005  |        0       |          0         | High Plains 
+Oct  1 - 15   |      3       |     50     |        0.0025  |        0       |          0         | High Plains 
+Oct 16 - 31   |      4       |     65     |        0.00325 |        129.457 |          0.5       | High Plains 
+Nov  1 - 15   |      5       |     707    |        0.03535 |        258.914 |          1         | High Plains 
+Nov 16 - 30   |      6       |     750    |        0.0375  |        258.914 |          1         | High Plains 
+Dec  1 - 15   |      7       |     11700  |        0.585   |        0       |          0         | High Plains 
+Dec 16 - 31   |      8       |     20,000 |        1       |        0       |          0         | High Plains 
+Jan  1 - 15   |      9       |     8540   |        0.427   |        0       |          0         | High Plains 
+Jan 16 - 31   |      10      |     8000   |        0.4     |        0       |          0         | High Plains 
+
+--------
+
+With these tables created for each harvest season and zone, I was able to create plots directly comparing harvest to migration. Below are the code chunks I created for each season to make each plot. I first read in my `.csv` file containing the raw and standardized migration and harvest data. I then created a `tibble` of the season dates to eventually plot them on the graph. Historic hunting season dates were obtained from KDWP. After examining the dates, I knew I was going to have the x-axis scaled by survey period. However, season dates are represented as integers for ease of plotting. I used `ggplot` to create the migration and harvest plots with the gray rectangles to represent timing and duration of each hunting season. In each plot, *\textcolor{red}{*red*}* lines represent harvest and *\textcolor{black}{*black*}* lines represent migration.
+
+```{r}
+# 2010-2011 harvest season
+# High Plains       -   Oct.9 - Jan.3 / Jan.22 - Jan.30
+# Low Plains Early  -   Oct.9 - Dec.5 / Dec.18 / Jan.2
+# Low Plains Late   -   Oct.30 - Jan.2 / Jan.22 - Jan.30
+# Southeast         -   Nov.5 - Dec. 31 # No true hunting season established, 
+                                        # this is harvest data what spilled over to 2011
+
+mig_har_10_11 <- read_csv("NEW MALL PLOTS/10-11 MALL Plot/10-11_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_10_11 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.5, #Oct 9
+    3.5, #Oct 9
+    4, #Oct 30
+    0.0 #No season recorded for SE
+  ),
+  season_1_end = c(
+    9.3, #Jan 3
+    7.5, #Dec 5
+    9.2, #Jan 2
+    0.0 #No season recorded for SE
+  ),
+  season_2_start = c(
+    10.3, #Jan 22
+    8.5, #Dec 18
+    10, #Jan 22
+    0.0 #No season recorded for SE
+  ),
+  season_2_end = c(
+    10.5, #Jan 30
+    9.2, #Jan 2
+    10.5, #Jan 30
+    0.0 #No season recorded for SE
+  ))
+
+# Creating the 2010-2011 MALL plot
+
+  ggplot(mig_har_10_11)+
+  geom_rect(data = season_dates_10_11, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_10_11, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_10_11, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_10_11, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2010 - 2011 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90))
+
+```
+
+```{r}
+# 2011-2012 harvest season
+# High Plains       -   Oct.8 - Jan.2 / Jan.21 - Jan.29
+# Low Plains Early  -   Oct.8 - Dec.4 / Dec.17 / Jan.1
+# Low Plains Late   -   Oct.29 - Jan.1 / Jan.21 - Jan.29
+# Southeast         -   Nov.5 - Jan.8  / Jan.21 - Jan.29
+
+mig_har_11_12 <- read_csv("NEW MALL PLOTS/11-12 MALL Plot/11-12_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_11_12 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.5, #Oct 8
+    3.5, #Oct 8
+    3.9, #Oct 29
+    5.2 #Nov 5
+  ),
+  season_1_end = c(
+    9.1, #Jan 2
+    7.5, #Dec 4
+    9, #Jan 1
+    9.5 #Jan 8
+  ),
+  season_2_start = c(
+    10.3, #Jan 21
+    8, #Dec 17
+    10, #Jan 21
+    10 #Jan 21
+  ),
+  season_2_end = c(
+    10.5, #Jan 29
+    9, #Jan 1
+    10.5, #Jan 29
+    10.5 #Jan 29
+  ))
+
+
+  ggplot(mig_har_11_12)+
+  geom_rect(data = season_dates_11_12, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_11_12, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_11_12, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_11_12, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2011 - 2012 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90)) 
+
+```
+
+
+```{r}
+# 2012-2013 harvest season
+# High Plains       -   Oct.6 - Dec.30 / Jan.19 - Jan.27
+# Low Plains Early  -   Oct.6 - Dec.2 / Dec.15 / Dec.30
+# Low Plains Late   -   Oct.27 - Dec.30 / Jan.19 - Jan.27
+# Southeast         -   Nov.15 - Jan.27  / NA - NA
+
+mig_har_12_13 <- read_csv("NEW MALL PLOTS/12-13 MALL Plot/12-13_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_12_13 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.4, #Oct 6
+    3.4, #Oct 6
+    4.5, #Oct 27
+    5.8 #Nov 15
+  ),
+  season_1_end = c(
+    8.8, #Dec 30
+    7, #Dec 2
+    8.8, #Dec 30
+    9.5 #Jan 27
+  ),
+  season_2_start = c(
+    10, #Jan 19
+    7.9, #Dec 15
+    10, #Jan 19
+    0.0 # no data
+  ),
+  season_2_end = c(
+    10.5, #Jan 27
+    8.9, #Dec 30
+    10.5, #Jan 27
+    0.0 # no data
+  ))
+
+
+  ggplot(mig_har_12_13)+
+  geom_rect(data = season_dates_12_13, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_12_13, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_12_13, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_12_13, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2012 - 2013 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90)) 
+
+```
+
+```{r}
+# 2013-2014 harvest season
+# High Plains       -   Oct.5 - Dec.2 / Dec.21 - Jan.26
+# Low Plains Early  -   Oct.5 - Dec.1 / Dec.21 / Jan.5
+# Low Plains Late   -   Oct.26 - Dec.29 / Jan.18 - Jan.26
+# Southeast         -   Nov.2 - Nov.3  / Nov.16 - Jan.26
+
+mig_har_13_14 <- read_csv("NEW MALL PLOTS/13-14 MALL Plot/13-14_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_13_14 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.4, #Oct 5
+    3.4, #Oct 5
+    4.5, #Oct 26
+    5 #Nov 2
+  ),
+  season_1_end = c(
+    7, #Dec 2
+    7, #Dec 1
+    8.8, #Dec 29
+    5.2 #Nov 3
+  ),
+  season_2_start = c(
+    8.2, #Dec 21
+    8.2, #Dec 21
+    10, #Jan 18
+    6 #Nov 16
+  ),
+  season_2_end = c(
+    10.3, #Jan 26
+    9.2, #Jan 5
+    10.3, #Jan 26
+    10.3 #Jan 26
+  ))
+
+
+  ggplot(mig_har_13_14)+
+  geom_rect(data = season_dates_13_14, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_13_14, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_13_14, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_13_14, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2013 - 2014 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90)) 
+
+```
+
+```{r}
+# 2014-2015 harvest season
+# High Plains       -   Oct.11 - Dec.8 / Dec.20 - Jan.25
+# Low Plains Early  -   Oct.11 - Dec.7 / Dec.20 / Jan.4
+# Low Plains Late   -   Nov.1 - Jan.4 / Jan.17 - Jan.25
+# Southeast         -   Nov.8 - Nov.9  / Nov.15 - Jan.25
+
+mig_har_14_15 <- read_csv("NEW MALL PLOTS/14-15 MALL Plot/14-15_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_14_15 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.5, #Oct 11
+    3.5, #Oct 11
+    5, #Nov 1
+    5.3 #Nov 8
+  ),
+  season_1_end = c(
+    7.4, #Dec 8
+    7.4, #Dec 7
+    9.2, #Jan 4
+    5.5 #Nov 9
+  ),
+  season_2_start = c(
+    8.1, #Dec 20
+    8.1, #Dec 20
+    10, #Jan 17
+    6 #Nov 15
+  ),
+  season_2_end = c(
+    10.5, #Jan 25
+    9.2, #Jan 4
+    10.5, #Jan 25
+    10.5 #Jan 25
+  ))
+
+
+  ggplot(mig_har_14_15)+
+  geom_rect(data = season_dates_14_15, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_14_15, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_14_15, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_14_15, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2014 - 2015 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90)) 
+
+```
+
+```{r}
+# 2015-2016 harvest season
+# High Plains       -   Oct.10 - Jan.4 / Jan.23 - Jan.31
+# Low Plains Early  -   Oct.10 - Dec.6 / Dec.19 / Jan.3
+# Low Plains Late   -   Oct.31 - Jan.3 / Jan.23 - Jan.31
+# Southeast         -   Nov.14 - Jan.3  / Jan.9 - Jan.31
+
+mig_har_15_16 <- read_csv("NEW MALL PLOTS/15-16 MALL Plot/15-16_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_15_16 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.3, #Oct 10
+    3.3, #Oct 10
+    4.9, #Oct 31
+    5.8 #Nov 14
+  ),
+  season_1_end = c(
+    9.2, #Jan 4
+    7.3, #Dec 6
+    9.1, #Jan 3
+    9.1 #Jan 3
+  ),
+  season_2_start = c(
+    10.2, #Jan 23
+    8, #Dec 19
+    10, #Jan 23
+    9.2 #Jan 9
+  ),
+  season_2_end = c(
+    10.8, #Jan 31
+    9.1, #Jan 3
+    10.8, #Jan 31
+    10.8 #Jan 31
+  ))
+
+
+  ggplot(mig_har_15_16)+
+  geom_rect(data = season_dates_15_16, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_15_16, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_15_16, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_15_16, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2015 - 2016 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90)) 
+
+```
+
+```{r}
+# 2016-2017 harvest season
+# High Plains       -   Oct.8 - Jan.1 / Jan.20 - Jan.29
+# Low Plains Early  -   Oct.8 - Dec.4 / Dec.17 / Jan.1
+# Low Plains Late   -   Oct.29 - Jan.1 / Jan.21 - Jan.29
+# Southeast         -   Nov.12 - Jan.1  / Jan.7 - Jan.29
+
+mig_har_16_17 <- read_csv("NEW MALL PLOTS/16-17 MALL Plot/16-17_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_16_17 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.2, #Oct 8
+    3.2, #Oct 8
+    4.7, #Oct 29
+    5.6 #Nov 12
+  ),
+  season_1_end = c(
+    9, #Jan 1
+    7.1, #Dec 4
+    9, #Jan 1
+    9 #Jan 1
+  ),
+  season_2_start = c(
+    10.1, #Jan 20
+    8, #Dec 17
+    10, #Jan 21
+    9.1 #Jan 7
+  ),
+  season_2_end = c(
+    10.5, #Jan 29
+    9, #Jan 1
+    10.5, #Jan 29
+    10.5 #Jan 29
+  ))
+
+
+  ggplot(mig_har_16_17)+
+  geom_rect(data = season_dates_16_17, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_16_17, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_16_17, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_16_17, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2016 - 2017 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90)) 
+
+```
+
+```{r}
+# 2017-2018 harvest season
+# High Plains       -   Oct.7 - Jan.1 / Jan.20 - Jan.28
+# Low Plains Early  -   Oct.7 - Dec.3 / Dec.16 / Dec.31
+# Low Plains Late   -   Oct.28 - Dec.31 / Jan.20 - Jan.28
+# Southeast         -   Nov.11 - Dec.31  / Jan.6 - Jan.28
+
+mig_har_17_18 <- read_csv("NEW MALL PLOTS/17-18 MALL Plot/17-18_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_17_18 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3, #Oct 7
+    3, #Oct 7
+    4, #Oct 28
+    5 #Nov 11
+  ),
+  season_1_end = c(
+    9, #Jan 1
+    7.1, #Dec 3
+    8.99, #Dec 31
+    8.9 #Dec 31
+  ),
+  season_2_start = c(
+    10.1, #Jan 20
+    8, #Dec 16
+    10, #Jan 20
+    9.05 #Jan 6
+  ),
+  season_2_end = c(
+    10.5, #Jan 28
+    8.99, #Dec 31
+    10.5, #Jan 28
+    10.5 #Jan 28
+  ))
+
+
+  ggplot(mig_har_17_18)+
+  geom_rect(data = season_dates_17_18, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_17_18, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_17_18, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_17_18, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2017 - 2018 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90))
+
+```
+
+```{r}
+# 2018-2019 harvest season
+# High Plains       -   Oct.13 - Dec.31 / Jan.12 - Jan.27
+# Low Plains Early  -   Oct.13 - Dec.16 / Dec.22 / Dec.30
+# Low Plains Late   -   Oct.27 - Dec.30 / Jan.19 - Jan.27
+# Southeast         -   Nov.10 - Jan.6  / Jan.12 - Jan.27
+
+mig_har_18_19 <- read_csv("NEW MALL PLOTS/18-19 MALL Plot/18_19_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_18_19 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3.8, #Oct 13
+    3.8, #Oct 13
+    4, #Oct 27
+    5.6 #Nov 10
+  ),
+  season_1_end = c(
+    8.9, #Dec 31
+    8.0, #Dec 16
+    8.8, #Dec 30
+    9.2 #Jan 6
+  ),
+  season_2_start = c(
+    9.7, #Jan 12
+    8.8, #Dec 22
+    10, #Jan 19
+    9.7 #Jan 12
+  ),
+  season_2_end = c(
+    10.5, #Jan 27
+    8.9, #Dec 30
+    10.5, #Jan 27
+    10.5 #Jan 27
+  ))
+
+
+  ggplot(mig_har_18_19)+
+  geom_rect(data = season_dates_18_19, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_18_19, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_18_19, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_18_19, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2018 - 2019 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90))
+
+```
+
+```{r}
+# 2019-2020 harvest season
+# High Plains       -   Oct.12 - Jan.6 / Jan.17 - Jan.26
+# Low Plains Early  -   Oct.12 - Dec.8 / Dec.14 / Dec.29
+# Low Plains Late   -   Oct.26 - Dec.29 / Jan.18 - Jan.26
+# Southeast         -   Nov.9 - Jan.5  / Jan.11 - Jan.26
+
+mig_har_19_20 <- read_csv("NEW MALL PLOTS/19-20 MALL Plot/19_20_MALL_mig_harvest_plot.csv", 
+                          show_col_types = FALSE)
+
+# Creating a tibble of the season dates to create the 
+# rectangles representing the harvest seasons
+season_dates_19_20 <-
+tibble(
+  Zone = 
+  c("High Plains",
+  "Low Plains Early",
+  "Low Plains Late",
+  "Southeast"),
+  
+  season_1_start = c(
+    3, #Oct 12
+    3, #Oct 12
+    4, #Oct 26
+    5 #Nov 9
+  ),
+  season_1_end = c(
+    9.1, #Jan 5
+    7.3, #Dec 8
+    9, #Dec 29
+    9.1 #Jan 5
+  ),
+  season_2_start = c(
+    10, #Jan 17
+    7.9, #Dec 14
+    10, #Jan 18
+    9.7 #Jan 11
+  ),
+  season_2_end = c(
+    10.5, #Jan 26
+    9, #Dec 29
+    10.5, #Jan 26
+    10.5 #Jan 26
+  ))
+
+
+  ggplot(mig_har_19_20)+
+  geom_rect(data = season_dates_19_20, aes(xmin = season_1_start, 
+                                     xmax = season_1_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_rect(data = season_dates_19_20, aes(xmin = season_2_start, 
+                                     xmax = season_2_end, 
+                                     ymin = -Inf, 
+                                     ymax = Inf), fill = "grey85")+
+  geom_line(data = mig_har_19_20, aes(x = SurveyPeriod, y = Proportion_Mig), color = "black")+
+  geom_line(data = mig_har_19_20, aes(x = SurveyPeriod, y = Proportion_Harvest), color = "red")+
+  facet_grid(~Zone)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y= "Proportion of Migration and Harvest", x= "Survey Period", 
+       title = "2019 - 2020 MALL Migration & Harvest")+
+  scale_x_discrete(name = "Survey Period", 
+                   limits = c("Sep 1-15", "Sep 16-30", "Oct 1-15", "Oct 16-31", 
+                              "Nov 1-15", "Nov 16-30","Dec 1-15", "Dec 16-31", 
+                              "Jan 1-15", "Jan 16-31"))+
+  theme(axis.text.x = element_text(size = 6, angle = 90))
+
+```
+
+I ran a Pearson Correlation analysis across all seasons to determine if there was any correlation between migration and harvest using the `cor.test` function. The `mig_har_all.csv` file contains the raw and proportion of migration and harvest data across all seasons from 2010-2011 through 2019-2020.
+```{r}
+mig_har_all <- read_csv("mig_har_2010_2020.csv")
+
+pearson_test <- cor.test(mig_har_all$`MALL total`, mig_har_all$`Harvest Weight`, 
+                         method = "pearson")
+pearson_test
+```
+# Results
+High Plains has 4 seasons of missing harvest data. This zone is composed of the western 1/3 of the state which is mostly arid and dry, not very suitable for waterfowl. This is not to say ducks are not found in this section of the state, but hunting opportunities may be few and far between and hunters in this region. Or, with only three wildlife areas in this zone, hunters living in this region could have traveled to another part of the state. There was some missing data in terms of hunting seasons. The 2010-2011 hunting season dates for the Southeast zone were not provided even though there was waterfowl harvested during this time. 
+
+There are a few instances where harvest peaks in times where there is no hunting season. In the BWS and PCS, there was no location variable that matched. The BWS was broken down to the zone level while the PCS was only broken down to the county level. When the previous PhD student cleaned the BWS data, he assigned zones to each survey based on the current (2019-2020) zone delineations. However, across the decade of data, the zone delineations changed. The instances where there are peaks in harvest outside of the hunting seasons (*n* = 5) mainly occurred in the Low Plains Early zone (Fig. 1, Fig. 2). In assigning entire counties to a zone, there will be some instances where data will overlap.
+
+If we look at Jewell county for example, we can see it is split between the Low Plains Late and Low Plains Early zone. Since most of the county was covered by the Low Plains Early zone (Fig. 1), I assigned Jewell county to the Low Plains Early zone in the PCS so as a result, we see harvest spikes where there is no season since there is some data overlap.
+
+In general, the historic Kansas hunting season have done a good job capturing the peak of migration during the actual hunting season. Across all seasons, there was 21 instances where harvest peaked before the peak of migration, 8 instances of harvest peaking after peak migration, and 5 instances of harvest peaking at the same time of the peak in migration. If harvest peaks before migration, hunters are continually encountering new "naive" birds. The balance of determining where the hunting seasons will be is a delicate balance. Managers want to assure hunters have the opportunity to harvest as many birds as possible. If the season is off by just two weeks, it can totally miss the peak of migration, resulting in less birds to harvest.
+
+The Pearson correlation analysis indicates that migration and harvest are correlated with a p-value of 2.2e-16. Correlations are examined on a scale from -1 to 1 indicating the strength and direction of the relationship. If the result is closer to -1 or 1 that means it’s a strong relationship, the closer to 0 means the variables are independent. Since I have a positive correlation of 0.6507, this indicates that as abundance increases, so does harvest and that the variables are not independent. 
+
+# Next Steps
+I will continue to develop these graphs with the season blocks for species specific groups requested by KDWP. I will also run some further analysis to provide managers with specific dates or survey periods when they can maximize harvest for hunters and see how that date or survey period may change in the future with the changing climate.
+
+# Refrences
+- Cooper, C., L. Larson, A. Dayer, R. Stedman, and D. Decker. 2015. Are wildlife recreationists 
+conservationists? Linking hunting, birdwatching, and pro-environmental behavior. Journal of 
+Wildlife Management 79:446–457.
+
+- Fulton, D., K. Slagle, and A. Raedeke. 2017. 2018 NAWMP hunter survey.
+
+- Green, A. J., and J. Elmberg. 2014. Ecosystem services provided by waterbirds. Biological Reviews 89:105-122. 
+
+- Grado, S. C., K. M. Hunt, C. P. Hutt, X. T. Santos, and R. M. Kaminski. 2011. Economic impacts of waterfowl hunting in Mississippi derived from a state-based mail survey. Human Dimensions of Wildlife 16:100–113.
+
+- Raftovich, R.V., K. K. Fleming, S. C. Chandler, and C. M. Cain. 2019. Migratory bird hunting activity and harvest during the 2017-18 and 2018-19 hunting seasons. U.S. Fish and Wildlife Service, Laurel, Maryland, USA.
+
+- Schummer, M. L., R. M. Kaminski, A. H. Raedeke, and D. A. Graber. 2010.  Weather-related indices of autumn-winter dabbling duck abundance in middle North America. Journal of Wildlife Management 74:94 – 101.
+
+- Schummer, M. L., J. M. Coluccy, M. Mitchell, and L. Van Den Elsen. 2017. Long-term changes in Weather Severity Indices for dabbling ducks in eastern North America, October – April 1979 – 2013. Wildlife Society Bulletin 41: 615–623.
